@@ -117,13 +117,34 @@ export default function Home() {
     return { total, wins, single, double, selected, opponentSelected, losingOpponents };
   }, [logs]);
 
-  const updateArray = (key: keyof BattleLog, index: number, value: string) => {
+  const updateArray = (
+    key: "myTeam" | "selected" | "opponentTeam" | "opponentSelected",
+    index: number,
+    value: string
+  ) => {
     setForm((prev) => {
       const current = prev[key];
-      if (!Array.isArray(current)) return prev;
-      const next = [...current];
-      next[index] = value;
-      return { ...prev, [key]: next };
+      const nextArray = [...current];
+      nextArray[index] = value;
+
+      const next = {
+        ...prev,
+        [key]: nextArray,
+      };
+
+      if (key === "myTeam") {
+        next.selected = next.selected.map((name) =>
+          next.myTeam.includes(name) ? name : ""
+        );
+      }
+
+      if (key === "opponentTeam") {
+        next.opponentSelected = next.opponentSelected.map((name) =>
+          next.opponentTeam.includes(name) ? name : ""
+        );
+      }
+
+      return next;
     });
   };
 
@@ -209,13 +230,37 @@ export default function Home() {
           </label>
         </div>
 
-        <PokemonSelectGroup title="自分のパーティ" values={form.myTeam} onChange={(i, v) => updateArray("myTeam", i, v)} />
-        <PokemonSelectGroup title={`自分の選出（${form.rule === "シングル" ? "最大3体" : "最大4体"}）`} values={form.selected} onChange={(i, v) => updateArray("selected", i, v)} />
-        <PokemonSelectGroup title="相手のパーティ" values={form.opponentTeam} onChange={(i, v) => updateArray("opponentTeam", i, v)} />
-        <PokemonSelectGroup title={`相手の選出（${form.rule === "シングル" ? "最大3体" : "最大4体"}）`} values={form.opponentSelected} onChange={(i, v) => updateArray("opponentSelected", i, v)} />
-
+      <PokemonSelectGroup
+        title="自分のパーティ"
+        values={form.myTeam}
+        options={POKEMON_OPTIONS}
+        onChange={(index, value) => updateArray("myTeam", index, value)}
+      />
+      <PokemonSelectGroup
+        title="自分の選出"
+        values={form.selected}
+        options={form.myTeam.filter(Boolean)}
+        onChange={(index, value) => updateArray("selected", index, value)}
+      />
+      <PokemonSelectGroup
+        title="相手のパーティ"
+        values={form.opponentTeam}
+        options={POKEMON_OPTIONS}
+        onChange={(index, value) => updateArray("opponentTeam", index, value)}
+      />
+      <PokemonSelectGroup
+        title="相手の選出"
+        values={form.opponentSelected}
+        options={form.opponentTeam.filter(Boolean)}
+        onChange={(index, value) => updateArray("opponentSelected", index, value)}
+      />
         <label>メモ<textarea value={form.memo} onChange={(e) => setForm({ ...form, memo: e.target.value })} placeholder="勝因、敗因、次に試すことなど" /></label>
         <button onClick={addLog}>記録する</button>
+      </section>
+
+      <section className="card note">
+        <h2>ポケモンリストの編集方法</h2>
+        <p><code>src/data/pokemon.json</code> に名前を追加すると、各プルダウンの候補に反映されます。</p>
       </section>
 
       <section className="grid">
@@ -251,19 +296,81 @@ export default function Home() {
   );
 }
 
-function PokemonSelectGroup({ title, values, onChange }: { title: string; values: string[]; onChange: (index: number, value: string) => void }) {
+function PokemonSelectGroup({
+  title,
+  values,
+  options,
+  onChange,
+}: {
+  title: string;
+  values: string[];
+  options: string[];
+  onChange: (index: number, value: string) => void;
+}) {
+  const [queries, setQueries] = useState<string[]>(() => values.map(() => ""));
+
+  const updateQuery = (index: number, value: string) => {
+    setQueries((prev) => {
+      const next = [...prev];
+      next[index] = value;
+      return next;
+    });
+
+    if (options.includes(value)) {
+      onChange(index, value);
+    }
+  };
+
   return (
     <div>
       <h3>{title}</h3>
       <div className="inputs">
-        {values.map((value, i) => (
-          <select key={i} value={value} onChange={(e) => onChange(i, e.target.value)} aria-label={`${title} ${i + 1}体目`}>
-            <option value="">{i + 1}体目を選択</option>
-            {POKEMON_OPTIONS.map((name) => (
-              <option key={name} value={name}>{name}</option>
-            ))}
-          </select>
-        ))}
+        {values.map((value, i) => {
+          const query = queries[i] ?? "";
+          const filteredOptions = options.filter((name) =>
+            name.includes(query.trim())
+          );
+          const datalistId = `${title}-${i}-pokemon-list`;
+
+          return (
+            <div className="pokemonSelectBox" key={i}>
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => updateQuery(i, e.target.value)}
+                placeholder={`${i + 1}体目を検索`}
+                list={datalistId}
+                aria-label={`${title} ${i + 1}体目を検索`}
+              />
+
+              <datalist id={datalistId}>
+                {filteredOptions.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+
+              <select
+                value={value}
+                onChange={(e) => {
+                  onChange(i, e.target.value);
+                  setQueries((prev) => {
+                    const next = [...prev];
+                    next[i] = e.target.value;
+                    return next;
+                  });
+                }}
+                aria-label={`${title} ${i + 1}体目`}
+              >
+                <option value="">{i + 1}体目を選択</option>
+                {options.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
