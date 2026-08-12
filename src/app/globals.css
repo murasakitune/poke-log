@@ -26,6 +26,10 @@ input, select, textarea { width: 100%; border: 1px solid var(--border); border-r
 textarea { min-height: 96px; resize: vertical; }
 .inputs { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
 button, .fileButton { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 999px; padding: 10px 16px; background: #111827; color: #fff; cursor: pointer; font-weight: 700; margin-top: 16px; }
+.secondary { background: #e5e7eb; color: var(--text); }
+.compact { margin: 0; padding: 6px 12px; }
+.groupHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; }
+.groupHeader h3 { margin: 0; }
 .fileButton input { display: none; }
 .danger { background: #7f1d1d; margin: 0; padding: 6px 10px; }
 .tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }

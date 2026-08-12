@@ -23,6 +23,7 @@ type LegacyBattleLog = Partial<BattleLog> & { format?: string };
 
 const STORAGE_KEY = "pokemon-battle-log-v2";
 const LEGACY_STORAGE_KEY = "pokemon-battle-log-v1";
+const MY_TEAM_STORAGE_KEY = "pokemon-battle-log-my-team";
 const RULES: Rule[] = ["シングル", "ダブル"];
 
 const selectedSizeByRule: Record<Rule, number> = {
@@ -87,22 +88,45 @@ function pct(n: number, d: number) {
 export default function Home() {
   const [logs, setLogs] = useState<BattleLog[]>([]);
   const [form, setForm] = useState<BattleLog>(() => emptyLog());
+  const [areLogsLoaded, setAreLogsLoaded] = useState(false);
+  const [isMyTeamLoaded, setIsMyTeamLoaded] = useState(false);
 
   useEffect(() => {
     const raw = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
-    if (!raw) return;
-    try {
-      const parsed = JSON.parse(raw) as LegacyBattleLog[];
-      if (!Array.isArray(parsed)) throw new Error();
-      setLogs(parsed.map(normalizeLog));
-    } catch {
-      localStorage.removeItem(STORAGE_KEY);
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as LegacyBattleLog[];
+        if (!Array.isArray(parsed)) throw new Error();
+        setLogs(parsed.map(normalizeLog));
+      } catch {
+        localStorage.removeItem(STORAGE_KEY);
+      }
     }
+    setAreLogsLoaded(true);
   }, []);
 
   useEffect(() => {
+    if (!areLogsLoaded) return;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(logs));
-  }, [logs]);
+  }, [areLogsLoaded, logs]);
+
+  useEffect(() => {
+    const savedMyTeam = localStorage.getItem(MY_TEAM_STORAGE_KEY);
+    if (savedMyTeam) {
+      try {
+        const parsed = JSON.parse(savedMyTeam) as unknown;
+        setForm((prev) => ({ ...prev, myTeam: normalizeArray(parsed, 6) }));
+      } catch {
+        localStorage.removeItem(MY_TEAM_STORAGE_KEY);
+      }
+    }
+    setIsMyTeamLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isMyTeamLoaded) return;
+    localStorage.setItem(MY_TEAM_STORAGE_KEY, JSON.stringify(form.myTeam));
+  }, [form.myTeam, isMyTeamLoaded]);
 
   const stats = useMemo(() => {
     const total = logs.length;
@@ -166,7 +190,15 @@ export default function Home() {
       return;
     }
     setLogs((prev) => [{ ...form, id: crypto.randomUUID() }, ...prev]);
-    setForm(emptyLog(form.rule));
+    setForm({ ...emptyLog(form.rule), myTeam: form.myTeam });
+  };
+
+  const resetMyTeam = () => {
+    setForm((prev) => ({
+      ...prev,
+      myTeam: Array(6).fill(""),
+      selected: Array(selectedSizeByRule[prev.rule]).fill(""),
+    }));
   };
 
   const deleteLog = (id: string) => {
@@ -230,8 +262,13 @@ export default function Home() {
           </label>
         </div>
 
+      <div className="groupHeader">
+        <h3>自分のパーティ</h3>
+        <button type="button" className="secondary compact" onClick={resetMyTeam}>リセット</button>
+      </div>
       <PokemonSelectGroup
         title="自分のパーティ"
+        hideTitle
         values={form.myTeam}
         options={pokemonOptions}
         onChange={(index, value) => updateArray("myTeam", index, value)}

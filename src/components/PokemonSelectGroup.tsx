@@ -2,15 +2,16 @@
 
 type Props = {
   title: string;
+  hideTitle?: boolean;
   values: string[];
   options: readonly string[];
   onChange: (index: number, value: string) => void;
 };
 
-export function PokemonSelectGroup({ title, values, options, onChange }: Props) {
+export function PokemonSelectGroup({ title, hideTitle = false, values, options, onChange }: Props) {
   return (
     <div>
-      <h3>{title}</h3>
+      {!hideTitle ? <h3>{title}</h3> : null}
       <div className="inputs">
         {values.map((value, index) => {
           const datalistId = `pokemon-list-${toSafeId(title)}-${index}`;
