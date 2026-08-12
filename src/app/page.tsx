@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import pokemonNames from "../data/pokemon.json";
+import { PokemonSelectGroup } from "../components/PokemonSelectGroup";
+import { pokemonOptions } from "../lib/pokemon";
 
 type Result = "win" | "lose";
 type Rule = "シングル" | "ダブル";
@@ -22,7 +23,6 @@ type LegacyBattleLog = Partial<BattleLog> & { format?: string };
 
 const STORAGE_KEY = "pokemon-battle-log-v2";
 const LEGACY_STORAGE_KEY = "pokemon-battle-log-v1";
-const POKEMON_OPTIONS = pokemonNames as string[];
 const RULES: Rule[] = ["シングル", "ダブル"];
 
 const selectedSizeByRule: Record<Rule, number> = {
@@ -233,7 +233,7 @@ export default function Home() {
       <PokemonSelectGroup
         title="自分のパーティ"
         values={form.myTeam}
-        options={POKEMON_OPTIONS}
+        options={pokemonOptions}
         onChange={(index, value) => updateArray("myTeam", index, value)}
       />
       <PokemonSelectGroup
@@ -245,7 +245,7 @@ export default function Home() {
       <PokemonSelectGroup
         title="相手のパーティ"
         values={form.opponentTeam}
-        options={POKEMON_OPTIONS}
+        options={pokemonOptions}
         onChange={(index, value) => updateArray("opponentTeam", index, value)}
       />
       <PokemonSelectGroup
@@ -293,86 +293,6 @@ export default function Home() {
         </div>
       </section>
     </main>
-  );
-}
-
-function PokemonSelectGroup({
-  title,
-  values,
-  options,
-  onChange,
-}: {
-  title: string;
-  values: string[];
-  options: string[];
-  onChange: (index: number, value: string) => void;
-}) {
-  const [queries, setQueries] = useState<string[]>(() => values.map(() => ""));
-
-  const updateQuery = (index: number, value: string) => {
-    setQueries((prev) => {
-      const next = [...prev];
-      next[index] = value;
-      return next;
-    });
-
-    if (options.includes(value)) {
-      onChange(index, value);
-    }
-  };
-
-  return (
-    <div>
-      <h3>{title}</h3>
-      <div className="inputs">
-        {values.map((value, i) => {
-          const query = queries[i] ?? "";
-          const filteredOptions = options.filter((name) =>
-            name.includes(query.trim())
-          );
-          const datalistId = `${title}-${i}-pokemon-list`;
-
-          return (
-            <div className="pokemonSelectBox" key={i}>
-              <input
-                type="search"
-                value={query}
-                onChange={(e) => updateQuery(i, e.target.value)}
-                placeholder={`${i + 1}体目を検索`}
-                list={datalistId}
-                aria-label={`${title} ${i + 1}体目を検索`}
-              />
-
-              <datalist id={datalistId}>
-                {filteredOptions.map((name) => (
-                  <option key={name} value={name} />
-                ))}
-              </datalist>
-
-              <select
-                value={value}
-                onChange={(e) => {
-                  onChange(i, e.target.value);
-                  setQueries((prev) => {
-                    const next = [...prev];
-                    next[i] = e.target.value;
-                    return next;
-                  });
-                }}
-                aria-label={`${title} ${i + 1}体目`}
-              >
-                <option value="">{i + 1}体目を選択</option>
-                {options.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          );
-        })}
-      </div>
-    </div>
   );
 }
 
