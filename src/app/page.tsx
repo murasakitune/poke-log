@@ -260,11 +260,6 @@ export default function Home() {
         <button onClick={addLog}>記録する</button>
       </section>
 
-      <section className="card note">
-        <h2>ポケモンリストの編集方法</h2>
-        <p><code>src/data/pokemon.json</code> に名前を追加すると、各プルダウンの候補に反映されます。</p>
-      </section>
-
       <section className="grid">
         <Ranking title="自分の選出率" entries={stats.selected} total={logs.length} />
         <Ranking title="相手の選出傾向" entries={stats.opponentSelected} total={logs.length} />
