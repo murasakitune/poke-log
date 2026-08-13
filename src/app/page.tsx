@@ -2,69 +2,19 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { PokemonSelectGroup } from "../components/PokemonSelectGroup";
+import {
+  BattleLog,
+  Result,
+  Rule,
+  createEmptyLog,
+  selectedSizeByRule,
+} from "../lib/battleLog";
 import { pokemonOptions } from "../lib/pokemon";
+import { createBattleLogFile, migrateBattleLogFile } from "../lib/migrations";
+import { loadLogs, loadMyTeam, saveLogs, saveMyTeam } from "../lib/storage";
+import { clearGoogleDriveRecords, syncWithGoogleDrive } from "../lib/sync";
 
-type Result = "win" | "lose";
-type Rule = "シングル" | "ダブル";
-
-type BattleLog = {
-  id: string;
-  date: string;
-  rule: Rule;
-  result: Result;
-  myTeam: string[];
-  selected: string[];
-  opponentTeam: string[];
-  opponentSelected: string[];
-  memo: string;
-};
-
-type LegacyBattleLog = Partial<BattleLog> & { format?: string };
-
-const STORAGE_KEY = "pokemon-battle-log-v2";
-const LEGACY_STORAGE_KEY = "pokemon-battle-log-v1";
-const MY_TEAM_STORAGE_KEY = "pokemon-battle-log-my-team";
 const RULES: Rule[] = ["シングル", "ダブル"];
-
-const selectedSizeByRule: Record<Rule, number> = {
-  シングル: 3,
-  ダブル: 4,
-};
-
-const emptyLog = (rule: Rule = "シングル"): BattleLog => ({
-  id: crypto.randomUUID(),
-  date: new Date().toISOString().slice(0, 10),
-  rule,
-  result: "win",
-  myTeam: ["", "", "", "", "", ""],
-  selected: Array(selectedSizeByRule[rule]).fill(""),
-  opponentTeam: ["", "", "", "", "", ""],
-  opponentSelected: Array(selectedSizeByRule[rule]).fill(""),
-  memo: "",
-});
-
-function normalizeLog(log: LegacyBattleLog): BattleLog {
-  const rawRule = log.rule ?? log.format;
-  const rule: Rule = rawRule === "ダブル" ? "ダブル" : "シングル";
-  const selectedSize = selectedSizeByRule[rule];
-
-  return {
-    id: log.id ?? crypto.randomUUID(),
-    date: log.date ?? new Date().toISOString().slice(0, 10),
-    rule,
-    result: log.result === "lose" ? "lose" : "win",
-    myTeam: normalizeArray(log.myTeam, 6),
-    selected: normalizeArray(log.selected, selectedSize),
-    opponentTeam: normalizeArray(log.opponentTeam, 6),
-    opponentSelected: normalizeArray(log.opponentSelected, selectedSize),
-    memo: log.memo ?? "",
-  };
-}
-
-function normalizeArray(values: unknown, length: number) {
-  const source = Array.isArray(values) ? values : [];
-  return Array.from({ length }, (_, i) => (typeof source[i] === "string" ? source[i] : ""));
-}
 
 function resizeArray(values: string[], length: number) {
   return Array.from({ length }, (_, i) => values[i] ?? "");
@@ -87,45 +37,30 @@ function pct(n: number, d: number) {
 
 export default function Home() {
   const [logs, setLogs] = useState<BattleLog[]>([]);
-  const [form, setForm] = useState<BattleLog>(() => emptyLog());
+  const [form, setForm] = useState<BattleLog>(() => createEmptyLog());
   const [areLogsLoaded, setAreLogsLoaded] = useState(false);
   const [isMyTeamLoaded, setIsMyTeamLoaded] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
   useEffect(() => {
-    const raw = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as LegacyBattleLog[];
-        if (!Array.isArray(parsed)) throw new Error();
-        setLogs(parsed.map(normalizeLog));
-      } catch {
-        localStorage.removeItem(STORAGE_KEY);
-      }
-    }
+    try { setLogs(loadLogs()); } catch { setNotice({ kind: "error", message: "保存データを読み込めませんでした。" }); }
     setAreLogsLoaded(true);
   }, []);
 
   useEffect(() => {
     if (!areLogsLoaded) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(logs));
+    saveLogs(logs);
   }, [areLogsLoaded, logs]);
 
   useEffect(() => {
-    const savedMyTeam = localStorage.getItem(MY_TEAM_STORAGE_KEY);
-    if (savedMyTeam) {
-      try {
-        const parsed = JSON.parse(savedMyTeam) as unknown;
-        setForm((prev) => ({ ...prev, myTeam: normalizeArray(parsed, 6) }));
-      } catch {
-        localStorage.removeItem(MY_TEAM_STORAGE_KEY);
-      }
-    }
+    try { setForm((prev) => ({ ...prev, myTeam: loadMyTeam() })); } catch { setNotice({ kind: "error", message: "保存した編成を読み込めませんでした。" }); }
     setIsMyTeamLoaded(true);
   }, []);
 
   useEffect(() => {
     if (!isMyTeamLoaded) return;
-    localStorage.setItem(MY_TEAM_STORAGE_KEY, JSON.stringify(form.myTeam));
+    saveMyTeam(form.myTeam);
   }, [form.myTeam, isMyTeamLoaded]);
 
   const stats = useMemo(() => {
@@ -189,8 +124,8 @@ export default function Home() {
       alert("自分の選出と相手の選出を1体以上選択してください。");
       return;
     }
-    setLogs((prev) => [{ ...form, id: crypto.randomUUID() }, ...prev]);
-    setForm({ ...emptyLog(form.rule), myTeam: form.myTeam });
+    setLogs((prev) => [{ ...form, id: crypto.randomUUID(), updatedAt: new Date().toISOString() }, ...prev]);
+    setForm({ ...createEmptyLog(form.rule), myTeam: form.myTeam });
   };
 
   const resetMyTeam = () => {
@@ -207,7 +142,7 @@ export default function Home() {
   };
 
   const exportJson = () => {
-    const blob = new Blob([JSON.stringify(logs, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify(createBattleLogFile(logs), null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -220,11 +155,41 @@ export default function Home() {
     if (!file) return;
     const text = await file.text();
     try {
-      const imported = JSON.parse(text) as LegacyBattleLog[];
-      if (!Array.isArray(imported)) throw new Error();
-      setLogs(imported.map(normalizeLog));
+      const imported = migrateBattleLogFile(JSON.parse(text) as unknown);
+      setLogs(imported.records);
+      setNotice({ kind: "success", message: "JSONを読み込みました。" });
     } catch {
-      alert("読み込みに失敗しました。JSON形式を確認してください。");
+      setNotice({ kind: "error", message: "読み込みに失敗しました。JSON形式を確認してください。" });
+    }
+  };
+
+  const syncDrive = async () => {
+    setIsSyncing(true);
+    setNotice(null);
+    try {
+      const merged = await syncWithGoogleDrive(logs);
+      setLogs(merged);
+      setNotice({ kind: "success", message: `Google Driveと同期しました（${merged.length}件）。` });
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Google Drive同期に失敗しました。" });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const clearAllLogs = async () => {
+    if (!confirm("すべてのログをLocalStorageとGoogle Driveから削除しますか？")) return;
+    setIsSyncing(true);
+    setNotice(null);
+    try {
+      await clearGoogleDriveRecords();
+      saveLogs([]);
+      setLogs([]);
+      setNotice({ kind: "success", message: "すべてのログを削除し、Google Driveを空にしました。" });
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "全件削除に失敗しました。" });
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -308,8 +273,11 @@ export default function Home() {
 
       <section className="card tools">
         <h2>バックアップ</h2>
+        <button onClick={syncDrive} disabled={isSyncing}>{isSyncing ? "同期中…" : "Google Driveと同期"}</button>
         <button onClick={exportJson}>JSONで書き出し</button>
         <label className="fileButton">JSONを読み込み<input type="file" accept="application/json" onChange={(e) => importJson(e.target.files?.[0] ?? null)} /></label>
+        <button className="danger" onClick={clearAllLogs} disabled={isSyncing}>全件削除</button>
+        {notice ? <p className={`notice ${notice.kind}`} role="status">{notice.message}</p> : null}
       </section>
 
       <section className="card">

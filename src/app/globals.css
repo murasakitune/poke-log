@@ -26,6 +26,7 @@ input, select, textarea { width: 100%; border: 1px solid var(--border); border-r
 textarea { min-height: 96px; resize: vertical; }
 .inputs { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
 button, .fileButton { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 999px; padding: 10px 16px; background: #111827; color: #fff; cursor: pointer; font-weight: 700; margin-top: 16px; }
+button:disabled { cursor: wait; opacity: .6; }
 .secondary { background: #e5e7eb; color: var(--text); }
 .compact { margin: 0; padding: 6px 12px; }
 .groupHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; }
@@ -34,6 +35,9 @@ button, .fileButton { display: inline-flex; align-items: center; justify-content
 .danger { background: #7f1d1d; margin: 0; padding: 6px 10px; }
 .tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .tools h2 { width: 100%; }
+.notice { width: 100%; margin: 4px 0 0; border-radius: 10px; padding: 10px 12px; }
+.notice.success { background: #dcfce7; color: #166534; }
+.notice.error { background: #fee2e2; color: #991b1b; }
 .ranking { padding-left: 20px; margin: 0; display: grid; gap: 10px; }
 .ranking li { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
 .logs { display: grid; gap: 12px; }
