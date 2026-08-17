@@ -38,6 +38,10 @@ button:disabled { cursor: wait; opacity: .6; }
 .notice { width: 100%; margin: 4px 0 0; border-radius: 10px; padding: 10px 12px; }
 .notice.success { background: #dcfce7; color: #166534; }
 .notice.error { background: #fee2e2; color: #991b1b; }
+.syncStatus { width: 100%; margin: 4px 0 0; border-radius: 10px; padding: 10px 12px; }
+.syncStatus.syncing { background: #e0f2fe; color: #075985; }
+.syncStatus.success { background: #dcfce7; color: #166534; }
+.syncStatus.error { background: #fee2e2; color: #991b1b; }
 .ranking { padding-left: 20px; margin: 0; display: grid; gap: 10px; }
 .ranking li { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
 .logs { display: grid; gap: 12px; }

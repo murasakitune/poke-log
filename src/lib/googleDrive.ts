@@ -23,11 +23,21 @@ declare global {
 let accessToken: string | null = null;
 let expiresAt = 0;
 let scriptPromise: Promise<void> | null = null;
+let authorizationPromise: Promise<string> | null = null;
+
+export type DriveAccessOptions = { interactive?: boolean };
+
+export class GoogleAuthorizationRequiredError extends Error {
+  constructor() {
+    super("Google Driveの認証が必要です。同期ボタンを押して認証してください。");
+    this.name = "GoogleAuthorizationRequiredError";
+  }
+}
 
 export type DriveFile = { id: string; name: string };
 
-export async function readBattleLogFile(): Promise<{ file: DriveFile | null; data: unknown | null }> {
-  const token = await authorize();
+export async function readBattleLogFile(options: DriveAccessOptions = {}): Promise<{ file: DriveFile | null; data: unknown | null }> {
+  const token = await authorize(options.interactive ?? true);
   const response = await driveFetch(
     `${DRIVE_API}?spaces=appDataFolder&q=${encodeURIComponent(`name = '${FILE_NAME}' and trashed = false`)}&fields=files(id,name)&pageSize=10`,
     token,
@@ -39,8 +49,8 @@ export async function readBattleLogFile(): Promise<{ file: DriveFile | null; dat
   return { file, data: await content.json() as unknown };
 }
 
-export async function writeBattleLogFile(data: BattleLogFileV1, fileId?: string): Promise<void> {
-  const token = await authorize();
+export async function writeBattleLogFile(data: BattleLogFileV1, fileId?: string, options: DriveAccessOptions = {}): Promise<void> {
+  const token = await authorize(options.interactive ?? true);
   const body = JSON.stringify(data, null, 2);
   if (fileId) {
     await driveFetch(`${DRIVE_UPLOAD_API}/${encodeURIComponent(fileId)}?uploadType=media`, token, {
@@ -64,28 +74,45 @@ export async function writeBattleLogFile(data: BattleLogFileV1, fileId?: string)
   });
 }
 
-async function authorize(): Promise<string> {
+async function authorize(interactive: boolean): Promise<string> {
   if (accessToken && Date.now() < expiresAt - 60_000) return accessToken;
+  if (authorizationPromise) return authorizationPromise;
   const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
   if (!clientId) throw new Error("Google Drive同期が設定されていません。");
   await loadGoogleIdentityServices();
 
+  authorizationPromise = requestToken(clientId, false).catch((error: unknown) => {
+    if (!interactive) throw error;
+    return requestToken(clientId, true);
+  });
+  try {
+    return await authorizationPromise;
+  } finally {
+    authorizationPromise = null;
+  }
+}
+
+function requestToken(clientId: string, interactive: boolean): Promise<string> {
   return new Promise((resolve, reject) => {
     const client = window.google!.accounts.oauth2.initTokenClient({
       client_id: clientId,
       scope: SCOPE,
       callback: (response) => {
         if (!response.access_token) {
-          reject(new Error(response.error_description ?? response.error ?? "Google認証に失敗しました。"));
+          reject(interactive
+            ? new Error(response.error_description ?? response.error ?? "Google認証に失敗しました。")
+            : new GoogleAuthorizationRequiredError());
           return;
         }
         accessToken = response.access_token;
         expiresAt = Date.now() + (response.expires_in ?? 3600) * 1000;
         resolve(response.access_token);
       },
-      error_callback: () => reject(new Error("Google認証がキャンセルされました。")),
+      error_callback: () => reject(interactive
+        ? new Error("Google認証がキャンセルされました。")
+        : new GoogleAuthorizationRequiredError()),
     });
-    client.requestAccessToken();
+    client.requestAccessToken(interactive ? undefined : { prompt: "" });
   });
 }
 

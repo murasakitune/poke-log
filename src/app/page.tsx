@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PokemonSelectGroup } from "../components/PokemonSelectGroup";
 import {
   BattleLog,
@@ -12,9 +12,14 @@ import {
 import { pokemonOptions } from "../lib/pokemon";
 import { createBattleLogFile, migrateBattleLogFile } from "../lib/migrations";
 import { loadLogs, loadMyTeam, saveLogs, saveMyTeam } from "../lib/storage";
-import { clearGoogleDriveRecords, syncWithGoogleDrive } from "../lib/sync";
+import { clearGoogleDriveRecords, mergeRecords, syncWithGoogleDrive } from "../lib/sync";
 
 const RULES: Rule[] = ["シングル", "ダブル"];
+const AUTO_UPLOAD_DELAY_MS = 10_000;
+const PERIODIC_SYNC_INTERVAL_MS = 5 * 60_000;
+const SYNC_SUCCESS_DISPLAY_MS = 4_000;
+
+type SyncStatus = "idle" | "syncing" | "success" | "error";
 
 function resizeArray(values: string[], length: number) {
   return Array.from({ length }, (_, i) => values[i] ?? "");
@@ -41,17 +46,104 @@ export default function Home() {
   const [areLogsLoaded, setAreLogsLoaded] = useState(false);
   const [isMyTeamLoaded, setIsMyTeamLoaded] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [localChangeVersion, setLocalChangeVersion] = useState(0);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
+  const [syncMessage, setSyncMessage] = useState("");
   const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const logsRef = useRef<BattleLog[]>([]);
+  const localChangeVersionRef = useRef(0);
+  const syncInFlightRef = useRef(false);
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    try { setLogs(loadLogs()); } catch { setNotice({ kind: "error", message: "保存データを読み込めませんでした。" }); }
+    try {
+      const loaded = loadLogs();
+      logsRef.current = loaded;
+      setLogs(loaded);
+    } catch {
+      setNotice({ kind: "error", message: "保存データを読み込めませんでした。" });
+    }
     setAreLogsLoaded(true);
   }, []);
 
   useEffect(() => {
     if (!areLogsLoaded) return;
+    logsRef.current = logs;
     saveLogs(logs);
   }, [areLogsLoaded, logs]);
+
+  const updateLogsLocally = useCallback((update: (current: BattleLog[]) => BattleLog[]) => {
+    setLogs((current) => {
+      const next = update(current);
+      logsRef.current = next;
+      return next;
+    });
+    localChangeVersionRef.current += 1;
+    setLocalChangeVersion(localChangeVersionRef.current);
+  }, []);
+
+  const runDriveSync = useCallback(async (interactive: boolean) => {
+    if (syncInFlightRef.current) return;
+    syncInFlightRef.current = true;
+    const versionAtStart = localChangeVersionRef.current;
+    if (successTimerRef.current) clearTimeout(successTimerRef.current);
+    setIsSyncing(true);
+    setSyncStatus("syncing");
+    setSyncMessage("Google Driveと同期中…");
+
+    try {
+      const synced = await syncWithGoogleDrive(logsRef.current, { interactive });
+      // Keep edits made while the request was in flight; the debounce will upload them next.
+      const latest = versionAtStart === localChangeVersionRef.current
+        ? synced
+        : mergeRecords(synced, logsRef.current);
+      logsRef.current = latest;
+      saveLogs(latest);
+      setLogs(latest);
+      setSyncStatus("success");
+      setSyncMessage(`同期完了（${latest.length}件）`);
+      successTimerRef.current = setTimeout(() => {
+        setSyncStatus("idle");
+        setSyncMessage("");
+      }, SYNC_SUCCESS_DISPLAY_MS);
+    } catch (error) {
+      setSyncStatus("error");
+      setSyncMessage(error instanceof Error ? error.message : "Google Drive同期に失敗しました。次回の同期で再試行します。");
+    } finally {
+      if (versionAtStart !== localChangeVersionRef.current) {
+        // If the original debounce fired while this request was busy, schedule one more attempt.
+        localChangeVersionRef.current += 1;
+        setLocalChangeVersion(localChangeVersionRef.current);
+      }
+      syncInFlightRef.current = false;
+      setIsSyncing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!areLogsLoaded) return;
+    void runDriveSync(false);
+
+    const intervalId = window.setInterval(() => void runDriveSync(false), PERIODIC_SYNC_INTERVAL_MS);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") void runDriveSync(false);
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [areLogsLoaded, runDriveSync]);
+
+  useEffect(() => {
+    if (!areLogsLoaded || localChangeVersion === 0) return;
+    const timeoutId = window.setTimeout(() => void runDriveSync(false), AUTO_UPLOAD_DELAY_MS);
+    return () => window.clearTimeout(timeoutId);
+  }, [areLogsLoaded, localChangeVersion, runDriveSync]);
+
+  useEffect(() => () => {
+    if (successTimerRef.current) clearTimeout(successTimerRef.current);
+  }, []);
 
   useEffect(() => {
     try { setForm((prev) => ({ ...prev, myTeam: loadMyTeam() })); } catch { setNotice({ kind: "error", message: "保存した編成を読み込めませんでした。" }); }
@@ -124,7 +216,7 @@ export default function Home() {
       alert("自分の選出と相手の選出を1体以上選択してください。");
       return;
     }
-    setLogs((prev) => [{ ...form, id: crypto.randomUUID(), updatedAt: new Date().toISOString() }, ...prev]);
+    updateLogsLocally((prev) => [{ ...form, id: crypto.randomUUID(), updatedAt: new Date().toISOString() }, ...prev]);
     setForm({ ...createEmptyLog(form.rule), myTeam: form.myTeam });
   };
 
@@ -138,7 +230,7 @@ export default function Home() {
 
   const deleteLog = (id: string) => {
     if (!confirm("このログを削除しますか？")) return;
-    setLogs((prev) => prev.filter((l) => l.id !== id));
+    updateLogsLocally((prev) => prev.filter((l) => l.id !== id));
   };
 
   const exportJson = () => {
@@ -156,7 +248,7 @@ export default function Home() {
     const text = await file.text();
     try {
       const imported = migrateBattleLogFile(JSON.parse(text) as unknown);
-      setLogs(imported.records);
+      updateLogsLocally(() => imported.records);
       setNotice({ kind: "success", message: "JSONを読み込みました。" });
     } catch {
       setNotice({ kind: "error", message: "読み込みに失敗しました。JSON形式を確認してください。" });
@@ -164,17 +256,8 @@ export default function Home() {
   };
 
   const syncDrive = async () => {
-    setIsSyncing(true);
     setNotice(null);
-    try {
-      const merged = await syncWithGoogleDrive(logs);
-      setLogs(merged);
-      setNotice({ kind: "success", message: `Google Driveと同期しました（${merged.length}件）。` });
-    } catch (error) {
-      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Google Drive同期に失敗しました。" });
-    } finally {
-      setIsSyncing(false);
-    }
+    await runDriveSync(true);
   };
 
   const clearAllLogs = async () => {
@@ -184,6 +267,7 @@ export default function Home() {
     try {
       await clearGoogleDriveRecords();
       saveLogs([]);
+      logsRef.current = [];
       setLogs([]);
       setNotice({ kind: "success", message: "すべてのログを削除し、Google Driveを空にしました。" });
     } catch (error) {
@@ -272,6 +356,9 @@ export default function Home() {
         <button onClick={exportJson}>JSONで書き出し</button>
         <label className="fileButton">JSONを読み込み<input type="file" accept="application/json" onChange={(e) => importJson(e.target.files?.[0] ?? null)} /></label>
         <button className="danger" onClick={clearAllLogs} disabled={isSyncing}>全件削除</button>
+        {syncStatus !== "idle" ? (
+          <p className={`syncStatus ${syncStatus}`} role="status" aria-live="polite">{syncMessage}</p>
+        ) : null}
         {notice ? <p className={`notice ${notice.kind}`} role="status">{notice.message}</p> : null}
       </section>
 
